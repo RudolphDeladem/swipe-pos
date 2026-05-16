@@ -7,7 +7,6 @@ function Sell({ products, setProducts, sales, setSales }) {
   const [receipt, setReceipt] = useState(false);
   const [search, setSearch] = useState("");
   const [flashMessage, setFlashMessage] = useState(null);
-  const [lastScanned, setLastScanned] = useState(null);
   const scannerRef = useRef(null);
   const quaggaRunning = useRef(false);
   const detectedCodes = useRef([]);
@@ -57,7 +56,7 @@ function Sell({ products, setProducts, sales, setSales }) {
     (sum, item) => sum + parseFloat(item.sellPrice) * item.qty,
     0
   );
-
+ // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!scannerRef.current) return;
 
