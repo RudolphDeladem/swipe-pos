@@ -10,6 +10,7 @@ function Sell({ products, setProducts, sales, setSales }) {
   const scannerRef = useRef(null);
   const quaggaRunning = useRef(false);
   const detectedCodes = useRef([]);
+  const lastScannedRef = useRef(null);
 
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -56,7 +57,43 @@ function Sell({ products, setProducts, sales, setSales }) {
     (sum, item) => sum + parseFloat(item.sellPrice) * item.qty,
     0
   );
- // eslint-disable-next-line react-hooks/exhaustive-deps
+
+  function checkout() {
+    if (cart.length === 0) {
+      alert("Cart is empty!");
+      return;
+    }
+    const sale = {
+      items: cart,
+      total,
+      payment,
+      date: new Date().toISOString(),
+    };
+    setSales([...sales, sale]);
+    setProducts(
+      products.map((p) => {
+        const cartItem = cart.find((c) => c.id === p.id);
+        if (cartItem) {
+          return { ...p, quantity: parseInt(p.quantity) - cartItem.qty };
+        }
+        return p;
+      })
+    );
+    setReceipt(true);
+  }
+
+  function newSale() {
+    setCart([]);
+    setReceipt(false);
+    setSearch("");
+  }
+
+  const productsRef = useRef(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!scannerRef.current) return;
 
@@ -109,24 +146,34 @@ function Sell({ products, setProducts, sales, setSales }) {
         if (count >= 3) {
           detectedCodes.current = [];
 
-          setLastScanned((prev) => {
-            if (prev === code) return prev;
+          if (lastScannedRef.current === code) return;
+          lastScannedRef.current = code;
+          setTimeout(() => {
+            lastScannedRef.current = null;
+          }, 2000);
 
-            setProducts((currentProducts) => {
-              const product = currentProducts.find(
-                (p) => normalizeBarcode(p.barcode) === code
-              );
-              if (product) {
-                addToCart(product);
-              } else {
-                showFlash("❌ Product not in inventory. Add it first.", "error");
+          const product = productsRef.current.find(
+            (p) => normalizeBarcode(p.barcode) === code
+          );
+
+          if (product) {
+            setCart((prev) => {
+              const existing = prev.find((item) => item.id === product.id);
+              if (existing) {
+                return prev.map((item) =>
+                  item.id === product.id
+                    ? { ...item, qty: item.qty + 1 }
+                    : item
+                );
               }
-              return currentProducts;
+              return [...prev, { ...product, qty: 1 }];
             });
-
-            setTimeout(() => setLastScanned(null), 2000);
-            return code;
-          });
+            setFlashMessage({ message: "✅ " + product.name + " added!", type: "success" });
+            setTimeout(() => setFlashMessage(null), 2000);
+          } else {
+            setFlashMessage({ message: "❌ Product not in inventory. Add it first.", type: "error" });
+            setTimeout(() => setFlashMessage(null), 2000);
+          }
         }
       });
     }, 800);
@@ -140,36 +187,6 @@ function Sell({ products, setProducts, sales, setSales }) {
       Quagga.offDetected();
     };
   }, []);
-
-  function checkout() {
-    if (cart.length === 0) {
-      alert("Cart is empty!");
-      return;
-    }
-    const sale = {
-      items: cart,
-      total,
-      payment,
-      date: new Date().toISOString(),
-    };
-    setSales([...sales, sale]);
-    setProducts(
-      products.map((p) => {
-        const cartItem = cart.find((c) => c.id === p.id);
-        if (cartItem) {
-          return { ...p, quantity: parseInt(p.quantity) - cartItem.qty };
-        }
-        return p;
-      })
-    );
-    setReceipt(true);
-  }
-
-  function newSale() {
-    setCart([]);
-    setReceipt(false);
-    setSearch("");
-  }
 
   if (receipt) {
     return (
@@ -207,8 +224,6 @@ function Sell({ products, setProducts, sales, setSales }) {
 
   return (
     <div className="flex flex-col">
-
-      {/* Flash Message */}
       {flashMessage && (
         <div
           className={`fixed top-20 left-4 right-4 z-50 py-3 px-4 rounded-2xl text-white text-center font-bold text-sm shadow-lg ${
@@ -219,13 +234,12 @@ function Sell({ products, setProducts, sales, setSales }) {
         </div>
       )}
 
-      {/* Scanner — always visible */}
+      {/* Scanner */}
       <div
         ref={scannerRef}
         className="relative w-full rounded-2xl overflow-hidden bg-black mb-3"
         style={{ height: "220px" }}
       >
-        {/* Aim overlay */}
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
           <div className="border-2 border-green-400 rounded-xl w-52 h-24 relative">
             <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-green-400 rounded-tl-lg"></div>
@@ -342,7 +356,6 @@ function Sell({ products, setProducts, sales, setSales }) {
             </div>
           </div>
 
-          {/* Checkout Button */}
           <button
             onClick={checkout}
             className="w-full bg-green-700 text-white py-4 rounded-2xl font-bold text-base shadow-lg"
