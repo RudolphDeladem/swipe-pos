@@ -929,18 +929,42 @@ class _Buffer:
         pass
 
 def _line_of(e):
-    if isinstance(e, SyntaxError) and getattr(e, "lineno", None):
-        return e.lineno
-    tb = e.__traceback__
-    line = None
-    while tb is not None:
-        try:
-            if tb.tb_frame.f_code.co_filename != __file__:
-                line = tb.tb_lineno
-        except Exception:
-            pass
-        tb = tb.tb_next
-    return line
+    try:
+        if isinstance(e, SyntaxError) and getattr(e, "lineno", None):
+            return e.lineno
+        tb = getattr(e, "__traceback__", None)
+        line = None
+        while tb is not None:
+            try:
+                if tb.tb_frame.f_code.co_filename != __file__:
+                    line = tb.tb_lineno
+            except Exception:
+                pass
+            tb = tb.tb_next
+        return line
+    except Exception:
+        return None
+
+import re as _re
+
+def _fullmatch(pattern, string, flags=0):
+    # Brython 3.12's re.fullmatch fails internally; emulate it with an anchored match.
+    if hasattr(pattern, "pattern"):
+        flags = flags or pattern.flags
+        pattern = pattern.pattern
+    return _re.match(r"(?:" + pattern + r")\Z", string, flags)
+
+_re.fullmatch = _fullmatch
+
+def _pattern_fullmatch(self, string, pos=0, endpos=None):
+    end = len(string) if endpos is None else endpos
+    m = _re.match(r"(?:" + self.pattern + r")\Z", string[:end], self.flags)
+    return m if pos == 0 else _re.compile(r"(?:" + self.pattern + r")\Z", self.flags).match(string[:end], pos)
+
+try:
+    _re.Pattern.fullmatch = _pattern_fullmatch
+except Exception:
+    pass
 
 _real_open = open
 
@@ -989,7 +1013,10 @@ def _run(src, stdin_text):
     except BaseException as e:
         line = _line_of(e)
         where = f"Error on line {line}\n" if line else "Error\n"
-        err = where + f"{type(e).__name__}: {e}"
+        try:
+            err = where + f"{type(e).__name__}: {e}"
+        except Exception:
+            err = where + "Internal interpreter error"
     finally:
         sys.stdout, sys.stderr = old_out, old_err
     return json.dumps({"out": "".join(out.parts), "err": err})
