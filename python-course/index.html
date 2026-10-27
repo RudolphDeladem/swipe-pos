@@ -935,12 +935,33 @@ def _line_of(e):
     line = None
     while tb is not None:
         try:
-            if tb.tb_frame.f_code.co_filename == "<pfz>":
+            if tb.tb_frame.f_code.co_filename != __file__:
                 line = tb.tb_lineno
         except Exception:
             pass
         tb = tb.tb_next
     return line
+
+_real_open = open
+
+def _open(file, mode="r", *args, **kwargs):
+    # Brython's in-memory files only support "r" and "w"; emulate "a" and "x".
+    if "a" not in mode and "x" not in mode:
+        return _real_open(file, mode, *args, **kwargs)
+    binary = "b" in mode
+    try:
+        enc = {"encoding": kwargs["encoding"]} if "encoding" in kwargs and not binary else {}
+        with _real_open(file, "rb" if binary else "r", **enc) as fh:
+            existing = fh.read()
+        exists = True
+    except (FileNotFoundError, OSError):
+        existing, exists = (b"" if binary else ""), False
+    if "x" in mode and exists:
+        raise FileExistsError(f"[Errno 17] File exists: {file!r}")
+    handle = _real_open(file, mode.replace("a", "w").replace("x", "w"), *args, **kwargs)
+    if "a" in mode and existing:
+        handle.write(existing)
+    return handle
 
 def _run(src, stdin_text):
     out = _Buffer()
@@ -956,13 +977,13 @@ def _run(src, stdin_text):
         out.write(value + "\n")
         return value
 
-    ns = {"__name__": "__main__", "input": _input}
+    ns = {"__name__": "__main__", "input": _input, "open": _open}
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout = out
     sys.stderr = out
     err = ""
     try:
-        exec(compile(src, "<pfz>", "exec"), ns)
+        exec(src, ns)
     except SystemExit:
         pass
     except BaseException as e:
@@ -980,6 +1001,20 @@ window.__pyReady()
 (function boot() {
   const s = document.getElementById('pyStatus');
   if (typeof brython !== 'function') { s.textContent = 'Python unavailable'; s.className = 'py-status failed'; s.title = 'The interpreter script did not load. Check your connection and reload the page.'; return; }
+  // Brython 3.12 raises TypeError for float("abc"); real Python raises ValueError.
+  try {
+    const B = __BRYTHON__, fl = B.builtins.float, orig = fl.$factory;
+    fl.$factory = function () {
+      try { return orig.apply(this, arguments); }
+      catch (e) {
+        if (e && e.__class__ === B.builtins.TypeError) {
+          const msg = B.builtins.str.$factory(e);
+          if (msg.startsWith('could not convert string to float')) throw B.builtins.ValueError.$factory(msg);
+        }
+        throw e;
+      }
+    };
+  } catch (e) { console.warn('float patch skipped', e); }
   try { brython({ debug: 0, ids: ['pfz_runner'] }); }
   catch (e) { s.textContent = 'Python failed'; s.className = 'py-status failed'; console.error(e); }
 })();
